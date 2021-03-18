@@ -1,0 +1,27 @@
+DATS 6101 - Project Proposal on Child Care Inspection
+
+Team Number: 6
+
+Team Members:
+1.	Yaqian Lin
+2.	Adina Dingankar
+3.	Ashwin Arun Dixit
+4.	Deyu Kong
+5.	Rehapriadarsini Manikandasamy
+
+Project Description:
+Child Care inspection in New York City is a significant issue highlighted in the past three years (2018-2020) where in the child care center underwent several rounds of inspection for its legitimacy. This dataset contains a record of all investigations conducted and any related violations at active, city-regulated, center-based child care programs and summer camps over that period of time. These violations are pre-adjudged and such violations are subjected to penalties (fines) and they are submitted to the New York City Office of Administrative Trials and Hearing where they are adjudged as either sustained/upheld or excused. The dataset in addition contains more information on the programs, including license information where each row is a single violation cited during the inspection. This project aims to learn how the childcare inspection has helped the centers over the period to curb the violation rate by taking into consideration the following factors like public health hazard violation, critical violation etc. 
+
+SMART Questions:
+Our team will be focussing on the following SMART questions in this project:
+1.	How the number of staff (Total Educational workers) capacity, location and program type affect the average violation rate, critical violation rate and public health violation rate?
+2.	Discover the data relationships among violation rate, public health hazard violation rate and critical violation rate
+3.	Find the critical violation rate as per inspection date and sort the values depending on the zip code column and find which are the centers that have improved the most over time?
+
+Data Source:
+The Child Care Inspection dataset is provided by the Department of Health and Mental Hygiene and is sourced by the NYC Open DATA repository. The dataset contains 37.4K rows and 34 columns. 
+https://data.cityofnewyork.us/Health/DOHMH-Childcare-Center-Inspections/dsg6-ifza
+
+GitHub:
+The project work progress will be committed to the following GitHub repo:
+https://github.com/adingankar/DATASCIENCE_6101
