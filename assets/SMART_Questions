@@ -8,8 +8,20 @@ SMART Questions discussed,
    >	Predict which borough is safe and unsafe compared to others based on the average violation rates.  
  
 2. Adina Dingankar
+   Question1:
+   How much is the ratio of total percentage of public health hazard violation rate for the infant toddlers in the year 2019-2020?
 
+   Question2: 
+   How can the missing values in the public health hazard violation rate be replaced with what proportion of the average value of that column?
 
+   Question3:
+   Summarize the data of Violation Rate percent column dependant on the column name date permitted. 
+
+   Question4: 
+   Find the critical violation rate as per the inspection date and sort the values depending on the zip code column.
+   
+   Question5:
+   Sort the inspection date on the basis of regularization summary column.
 
 
 3. Ashwin Arun Dixit
