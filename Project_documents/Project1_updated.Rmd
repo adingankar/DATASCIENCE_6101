@@ -1,0 +1,619 @@
+---
+title: "Child Care Inspection in New York City"
+author: "Team Number: 6"                                                                                          
+date: "03/2021"
+# date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    # number_sections: true
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r basic, include=F}
+# use this function to conveniently load libraries and work smoothly with knitting
+# can add quietly=T option to the require() function
+# the loadPkg function essentially replaced/substituted two functions install.packages() and library() in one step.
+loadPkg = function(x) { if (!require(x,character.only=T, quietly =T)) { install.packages(x,dep=T,repos="http://cran.us.r-project.org"); if(!require(x,character.only=T)) stop("Package not found") } }
+
+# unload/detact package when done using it
+unloadPkg = function(pkg, character.only = FALSE) { 
+  if(!character.only) { pkg <- as.character(substitute(pkg)) } 
+  search_item <- paste("package", pkg,sep = ":") 
+  while(search_item %in% search()) { detach(search_item, unload = TRUE, character.only = TRUE) } 
+}
+```
+
+```{r setup, include=FALSE}
+# some of common options (and the defaults) are: 
+# include=T, eval=T, echo=T, results='hide'/'asis'/'markup',..., collapse=F, warning=T, message=T, error=T, cache=T, fig.width=6, fig.height=4, fig.dim=c(6,4) #inches, fig.align='left'/'center','right', 
+# knitr::opts_chunk$set(warning = F, results = "markup", message = F)
+knitr::opts_chunk$set(warning = F, results = "hide", message = F)
+# knitr::opts_chunk$set(include = F)
+# knitr::opts_chunk$set(echo = TRUE)
+options(scientific=T, digits = 3) 
+# options(scipen=9, digits = 3) 
+# ‘scipen’: integer. A penalty to be applied when deciding to print numeric values in fixed or exponential notation.  Positive values bias towards fixed and negative towards scientific notation: fixed notation will be preferred unless it is more than ‘scipen’ digits wider.
+# use scipen=999 to prevent scientific notation at all times
+```
+
+```{r xkablesummary}
+loadPkg("xtable")
+loadPkg("kableExtra")
+loadPkg("stringi")
+
+xkabledply = function(modelsmmrytable, title="Table", digits = 4, pos="left", bso="striped", wide=FALSE) { 
+  #' Combining base::summary, xtable, and kableExtra, to easily display model summary. 
+  #' wrapper for the base::summary function on model objects
+  #' Can also use as head for better display
+  #' ELo 202004 GWU DATS
+  #' version 1.2
+  #' @param modelsmmrytable This can be a generic table, a model object such as lm(), or the summary of a model object summary(lm()) 
+  #' @param title Title of table. 
+  #' @param digits Number of digits to display
+  #' @param pos Position of table, c("left","center","right") 
+  #' @param bso bootstrap_options = c("basic", "striped", "bordered", "hover", "condensed", "responsive")
+  #' @param wide print table in long (FALSE) format or wide (TRUE) format
+  #' @return HTML table for display
+  #' @examples
+  #' library("xtable")
+  #' library("kableExtra")
+  #' xkabledply( df, title="Table testing", pos="left", bso="hover" )
+  #' xkabledply( ISLR::Hitters[1:5,] )
+  if (wide) { modelsmmrytable <- t(modelsmmrytable) }
+  modelsmmrytable %>%
+    xtable() %>% 
+    kable(caption = title, digits = digits) %>%
+    kable_styling(bootstrap_options = bso, full_width = FALSE, position = pos)
+}
+
+xkabledplyhead = function(df, rows=5, title="Head", digits = 4, pos="left", bso="striped") { 
+  xkabledply(df[1:rows, ], title, digits, pos, bso, wide=FALSE)
+}
+
+xkabledplytail = function(df, rows=5, title="Tail", digits = 4, pos="left", bso="striped") { 
+  trows = nrow(df)
+  xkabledply(df[ (trows-rows+1) : trows, ], title, digits, pos, bso, wide=FALSE)
+}
+
+xkablesummary = function(df, title="Table: Statistics summary.", digits = 4, pos="left", bso="striped") { 
+  #' Combining base::summary, xtable, and kableExtra, to easily display numeric variable summary of dataframes. 
+  #' ELo 202004 GWU DATS
+  #' version 1.2
+  #' @param df The dataframe.
+  #' @param title Title of table. 
+  #' @param digits Number of digits to display
+  #' @param pos Position of table, c("left","center","right") 
+  #' @param bso bootstrap_options = c("basic", "striped", "bordered", "hover", "condensed", "responsive")
+  #' @return The HTML summary table for display, or for knitr to process into other formats 
+  #' @examples
+  #' xkablesummary( faraway::ozone )
+  #' xkablesummary( ISLR::Hitters, title="Five number summary", pos="left", bso="hover"  )
+  
+  s = summary(df) %>%
+    apply( 2, function(x) stringr::str_remove_all(x,c("Min.\\s*:\\s*","1st Qu.\\s*:\\s*","Median\\s*:\\s*","Mean\\s*:\\s*","3rd Qu.\\s*:\\s*","Max.\\s*:\\s*")) ) %>% # replace all leading words
+    apply( 2, function(x) stringr::str_trim(x, "right")) # trim trailing spaces left
+  
+  colnames(s) <- stringr::str_trim(colnames(s))
+  
+  if ( dim(s)[1] ==6 ) { rownames(s) <- c('Min','Q1','Median','Mean','Q3','Max') 
+  } else if ( dim(s)[1] ==7 ) { rownames(s) <- c('Min','Q1','Median','Mean','Q3','Max','NA') }
+  
+  xkabledply(s, title=title, digits = digits, pos=pos, bso=bso )
+}
+
+xkablevif = function(model, title="VIFs of the model", digits = 3, pos="left", bso="striped", wide=TRUE) { 
+  #' Combining faraway::vif, xtable, and kableExtra, to easily display numeric summary of VIFs for a model. 
+  #' ELo 202004 GWU DATS
+  #' version 1.2
+  #' @param model The lm or compatible model object.
+  #' @param title Title of table. 
+  #' @param digits Number of digits to display
+  #' @param pos Position of table, c("left","center","right") 
+  #' @param bso bootstrap_options = c("basic", "striped", "bordered", "hover", "condensed", "responsive")
+  #' @param wide print table in long (FALSE) format or wide (TRUE) format
+  #' @return The HTML summary table of the VIFs for a model for display, or for knitr to process into other formats 
+  #' @examples
+  #' xkablevif( lm(Salary~Hits+RBI, data=ISLR::Hitters, wide=T ) )
+  
+  vifs = table( names(model$coefficients)[2:length(model$coefficients)] ) # remove intercept to set column names
+  vifs[] = faraway::vif(model) # set the values
+  if (wide) { vifs <- t(vifs) }
+  xkabledply( vifs, title=title, digits = digits, pos=pos, bso=bso )
+}
+```
+
+
+```{r outlierKD2}
+# Fix outliers
+outlierKD2 <- function(df, var, rm=FALSE, boxplt=FALSE, histogram=TRUE, qqplt=FALSE) { 
+    #' Original outlierKD functino by By Klodian Dhana,
+    #' https://www.r-bloggers.com/identify-describe-plot-and-remove-the-outliers-from-the-dataset/
+    #' Modified to have third argument for removing outliers instead of interactive prompt, 
+    #' and after removing outlier, original df will not be changed. The function returns the a df, 
+    #' which can be saved as original df name if desired.
+    #' Also added QQ-plot in the output, with options to show/hide boxplot, histogram, qqplot.
+    #' Check outliers, and option to remove them, save as a new dataframe. 
+    #' @param df The dataframe.
+    #' @param var The variable in the dataframe to be checked for outliers
+    #' @param rm Boolean. Whether to remove outliers or not.
+    #' @param boxplt Boolean. Whether to show the boxplot, before and after outliers removed.
+    #' @param histogram Boolean. Whether to show the histogram, before and after outliers removed.
+    #' @param qqplt Boolean. Whether to show the qqplot, before and after outliers removed.
+    #' @return The dataframe with outliers replaced by NA if rm==TRUE, or df if nothing changed
+    #' @examples
+    #' outlierKD2(mydf, height, FALSE, TRUE, TRUE, TRUE)
+    #' mydf = outlierKD2(mydf, height, TRUE, TRUE, TRUE, TRUE)
+    #' mydfnew = outlierKD2(mydf, height, TRUE)
+    dt = df # duplicate the dataframe for potential alteration
+    var_name <- eval(substitute(var),eval(dt))
+    na1 <- sum(is.na(var_name))
+    m1 <- mean(var_name, na.rm = T)
+    par(mfrow=c(2, boxplt+histogram+qqplt), oma=c(0,0,3,0))
+    if (qqplt) { 
+      qqnorm(var_name, main = "With outliers")
+      qqline(var_name)
+    }
+    if (histogram) { hist(var_name, main="With outliers", xlab=NA, ylab=NA) }
+    if (boxplt) { boxplot(var_name, main="With outliers") }
+
+    outlier <- boxplot.stats(var_name)$out
+    mo <- mean(outlier)
+    var_name <- ifelse(var_name %in% outlier, NA, var_name)
+    if (qqplt) { 
+      qqnorm(var_name, main = "Without outliers")
+      qqline(var_name)
+    }
+    if (histogram) { hist(var_name, main="Without outliers", xlab=NA, ylab=NA) }
+    if (boxplt) { boxplot(var_name, main="Without outliers") }
+
+    title("Outlier Check", outer=TRUE)
+    na2 <- sum(is.na(var_name))
+    cat("Outliers identified:", na2 - na1, "\n")
+    cat("Propotion (%) of outliers:", round((na2 - na1) / sum(!is.na(var_name))*100, 1), "\n")
+    cat("Mean of the outliers:", round(mo, 2), "\n")
+    m2 <- mean(var_name, na.rm = T)
+    cat("Mean without removing outliers:", round(m1, 2), "\n")
+    cat("Mean if we remove outliers:", round(m2, 2), "\n")
+    
+    # response <- readline(prompt="Do you want to remove outliers and to replace with NA? [yes/no]: ")
+    # if(response == "y" | response == "yes"){
+    if(rm){
+        dt[as.character(substitute(var))] <- invisible(var_name)
+        #assign(as.character(as.list(match.call())$dt), dt, envir = .GlobalEnv)
+        cat("Outliers successfully removed", "\n")
+        return(invisible(dt))
+    } else {
+        cat("Nothing changed", "\n")
+        return(invisible(df))
+    }
+}
+```
+
+
+## 1 Introduction
+
+Child Care inspection in New York City is a significant issue highlighted in the recent years (2018-2021) where child care centers underwent several rounds of inspection for its legitimacy. This dataset contains a record of all investigations conducted and any related violations at active, city-regulated, center-based child care programs and summer camps over that period of time. These violations are pre-adjudged and such violations are subjected to penalties (fines) and they are submitted to the New York City Office of Administrative Trials and Hearing where they are adjudged as either sustained/upheld or excused. The dataset in addition contains more information on the programs, including license information where each row is a single violation cited during the inspection. 
+
+This project aims to learn how the childcare inspection has helped the centers over the period to curb the violation rate by taking into consideration the following factors like public health hazard violation, critical violation etc. Therefore, our team will be focusing on the following SMART questions in this project:
+
+1. To discover the distribution of Centers, Borough and Program Type
+2. What is the percent of violations reported in each category in all the childcare centers?
+3. Which borough has improved over the period (2018-2021)?
+
+Next, we will use exploratory data analysis(EDA), statistical testing and model building to solve our smart questions.
+
+## 2 EDA
+
+### 2.1 Preparation for EDA 
+```{r, results='markup'}
+# Import the data, call it `childcare_orig.
+loadPkg("readr")
+childcare_orig <- data.frame(read_csv("DOHMH_Childcare_Center_Inspections.csv"))
+str(childcare_orig)
+# nrow(childcare_orig)
+```
+The above is our original dataset. There are `r nrow(childcare_orig)` observations and `r length(childcare_orig)` variables. We can see that some data here is meaningless and unneeded such as ZipCode, Building, Street, Phone, Permit.Number, Day.Care.ID, Building.Identification.Number, etc. So we have to clean up the data before doing analysis.
+
+```{r, results='markup'}
+# Remove redundant duplicated entries, drop unwanted variables, call it childcare
+childcare <- childcare_orig[!duplicated(childcare_orig), ] %>%
+             subset(select = -c(ZipCode, Building, Street, Phone, Permit.Number, Day.Care.ID, Building.Identification.Number, Actual, URL, Regulation.Summary, Health.Code.Sub.Section, Inspection.Summary.Result))
+childcare$Program.Type <- toupper(childcare$Program.Type)
+str(childcare)
+# nrow(childcare)
+```
+We removed redundant duplicated entries and dropped unwanted variables, then we got a new dataset. We called it *childcare*. We wil use it for later analysis. Now, there are only `r nrow(childcare)` observations and `r length(childcare)` variables. We can see there were quite a lot of human errors in the original dataset (over 8000 unnecessary duplicate entries). 
+
+```{r, results='markup'}
+# Select only the unique rows based on Names, Call it Centers
+Centers <- childcare[!duplicated(childcare$Center.Name), ]
+str(Centers)
+```
+
+We need to discover the distribution of Centers, Borough and Program Type, but there are duplicated centers in *childcare* dataset, so we selected only the unique rows based on Center Names. Then we called this dataset *Centers*. We can see there are `r nrow(Centers)` different childcare institutions in this dataset. 
+
+### 2.2 Distribution of Centers
+```{r S4_1, results='hide'}
+# Discover the distribution of Borough and Program Type across different Institutions
+loadPkg("ggplot2")
+bar_Bor <- ggplot(Centers, aes(x = Borough)) +
+           geom_bar() +
+           geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5) +
+           ggtitle("Centers vs Borough" )
+bar_Bor
+```
+
+```{r}
+loadPkg("dplyr")
+Bor <- group_by(Centers, Borough) %>%
+       count() %>%
+       ungroup()%>% 
+       arrange(desc(Borough)) %>%
+       mutate(percentage = round(n/sum(n), 4) * 100,
+       lab.pos = cumsum(percentage)-.5*percentage,
+       ymax = cumsum(percentage),
+       ymin = c(0, head(ymax, n = -1)))
+
+donut_Bor <- ggplot(Bor, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 3,fill = Borough)) +
+             ggtitle("Donut Chart of Centers in Different Borough") +
+             geom_rect() +
+             geom_text(x = 3.5, aes(y = lab.pos, label = percentage), size = 4) +
+             scale_fill_brewer(palette = 4) +
+             scale_color_brewer(palette = 4) +
+             coord_polar(theta = "y") +
+             xlim(c(-1, 4)) +
+             theme_void() 
+donut_Bor
+```
+
+From the donut chart above, we can see the distribution of childcare centers in different boroughs. We can see that Brooklyn has the largest number of childcare institutions, occupying 40% in total. Queens and Manhattan run 2nd and 3rd, with around 20% each. Staten Island has the fewest due to population size. 
+
+Borough-wise, we can see that Staten Island has the fewest amount of childcare institutions, while Brooklyn has the most. This could be explained by the difference in population across different Boroughs. Manhattan, which is the highest GDP per capita Borough in NY, does not have a large number of childcare centers. This observation could be attributed to demographic and income structure. Manhattan is the Financial and Commercial center, but it is not a residential center, as people tend to live in other parts of the city due to land price. For people who reside in this Borough who are more likely to have higher income to afford the cost of living, they have more alternatives for their children including domestic nurses and tutoring resulting in less demand for childcare centers in this area. This could be contrasted in Brooklyn where the Big Apple’s working class work and live. Here, people are more likely to require a childcare center since they have less alternatives for their children when their parents are not available.
+
+```{r S4_2, results='hide'}
+bar_Type <- ggplot(Centers, aes(x = Program.Type)) +
+            geom_bar() +
+            geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5) +
+            ggtitle("Centers vs Program.Type" )
+bar_Type
+```
+
+```{r}
+Type <- group_by(Centers, Program.Type) %>%
+        count() %>%
+        ungroup()%>% 
+        arrange(desc(Program.Type)) %>%
+        mutate(percentage = round(n/sum(n), 4) * 100,
+        lab.pos = cumsum(percentage)-.5*percentage,
+        ymax = cumsum(percentage),
+        ymin = c(0, head(ymax, n = -1)))
+Type <- Type[-c(1, 2), ]
+
+donut_Type <- ggplot(Type, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = Program.Type)) +
+              ggtitle("Donut Chart of Centers in Different Program.Type") +
+              geom_rect() +
+              geom_text(x = 3.5, aes(y = lab.pos, label = percentage), size = 4) +
+              scale_fill_brewer(palette = 1) +
+              scale_color_brewer(palette = 1) +
+              coord_polar(theta = "y") +
+              xlim(c(-1, 4)) +
+              theme_void() 
+donut_Type
+```
+
+From plot *Centers vs Program.Type*, we can see that there are both one observation in Preschool Camp and School Age Camp. Therefore, we can drop them when we make a donut chart.
+
+From *Donut Chart of Centers in Different Program.Type*, we can see that the majority, more than 80%, of the centers tends to the preschool children, aging between 2 to 5. Infant toddlers from 0 to 2 years old have 13% of the centers. All age camps only occupy 3%. One of the reasons why there are more preschools than infant toddler is that the age span of preschools is relatively large. And for infants, parents are more inclined to raise by themselves or hire a babysitter, but when the child is 2 years old, parents are more willing to let the child go to preschool to learn and get to know more peers.
+
+
+```{r}
+bar_VioCat <- ggplot(childcare, aes(x = Violation.Category)) +
+            geom_bar() +
+            geom_text(stat = 'count', aes(label = ..count..), vjust = -0.5) +
+            ggtitle("Plot of Violation Category")
+bar_VioCat
+```
+
+```{r}
+VioCat <- group_by(childcare, Violation.Category) %>%
+          count() %>%
+          ungroup()%>% 
+          mutate(percentage = round(n/sum(n), 4) * 100,
+          lab.pos = cumsum(percentage)-.5*percentage,
+          ymax = cumsum(percentage),
+          ymin = c(0, head(ymax, n = -1)))
+
+donut_VioCat <- ggplot(VioCat, aes(ymax = ymax, ymin = ymin, xmax = 4, xmin = 3, fill = Violation.Category)) +
+                ggtitle("Donut Chart of Vilation Category") +
+                geom_rect() +
+                geom_text(x = 3.5, aes(y = lab.pos, label = percentage), size = 5) +
+                scale_fill_brewer(palette = 8) +
+                scale_color_brewer(palette = 8) +
+                coord_polar(theta = "y") +
+                xlim(c(-1, 4)) +
+                theme_void() 
+donut_VioCat
+```
+
+From *Donut Chart of Violation Category*, 7.18% of all inspections is public health hazard violations, 18.43% is critical Violations, 30.98% is general violations, and 43.41% of all inspections is NA. The NA in violation category means no violation was detected during that inspection. In other words, only around 43.41% of the inspections were violation-free. This also shows that more than half of the violations occurred during this period. It is hoped that through inspections, the subsequent violation rate can be reduced.
+
+### 2.3 Distribution of Total Educational Workers
+```{r}
+hist_Edu_Bor <- ggplot(Centers, aes(x = Total.Educational.Workers, 
+                                    color = Borough, 
+                                    fill = Borough)) +
+                geom_histogram(binwidth = 1,
+                               alpha = 0.3, 
+                               position = "identity")+ 
+                theme(plot.title = element_text(hjust = 0.5),
+                      legend.background = element_blank(),
+                      legend.position = c(0.85, 0.5)) + 
+                labs(title = "Histogram for No. of Educational Workers (Colored by Borough)", 
+                     x = "No. of Educational Workers",
+                     y = "Count")
+hist_Edu_Bor
+```
+
+
+```{r, results='hide'}
+hist_Edu_Typ <- ggplot(Centers, aes(x = Total.Educational.Workers, 
+                                    color = Program.Type, 
+                                    fill = Program.Type)) +
+                geom_histogram(binwidth = 1,
+                               alpha = 0.3, 
+                               position = "identity")+ 
+                theme(plot.title = element_text(hjust = 0.5)) + 
+                labs(title = "Histogram for No. of Educational Workers (Colored by Program Type)", 
+                     x = "No. of Educational Workers",
+                     y = "Count")
+hist_Edu_Typ
+```
+
+```{r}
+box_Edu_Bor <- ggplot(Centers, aes(y = Total.Educational.Workers,
+                                   x = Borough,
+                                   fill = Borough, 
+                                   color = Borough)) + 
+               geom_boxplot(alpha = 0.3) +
+               theme(plot.title = element_text(hjust = 0.5),
+                      legend.background = element_blank(),
+                      legend.position = c(0.87, 0.72)) +
+               ggtitle("Boxplot for No. of Educational workers (Colored by Borough)") +
+               scale_y_continuous(name = "No. of Educational workers") + 
+               scale_x_discrete(name = "Borough")
+box_Edu_Bor
+```
+
+
+```{r, results='hide'}
+box_Edu_Typ <- ggplot(Centers, aes(y = Total.Educational.Workers,
+                                   x = Program.Type,
+                                   fill = Program.Type, 
+                                   color = Program.Type)) + 
+               geom_boxplot(alpha = 0.3) +
+               theme(plot.title = element_text(hjust = 0.5)) +
+               ggtitle("Boxplot for No. of Educational workers (Colored by Program Type)") +
+               scale_y_continuous(name = "No. of Educational workers") + 
+               scale_x_discrete(name = "Program Type")
+box_Edu_Typ
+```
+
+
+```{r}
+median(Centers$Total.Educational.Workers)
+quantile(Centers$Total.Educational.Workers, 0.8)
+```
+
+We could have a glimpse of the intrinsic nature of these centers. From the number of educational workers and their maximum capacity to host children, we can better understand this dataset. We can see from this histogram plotted with binwidth=1, the distribution of educational workers is heavily right skewed. The majority of the institutions cluster around the smaller side, with a median of 7 workers and 80% quantile 13 workers; while the long tail, outliers continue to pop up. This pattern does not differ from Borough to Borough.
+
+### 2.4 Distribution of Maximum Capacity
+```{r}
+hist_Cap_Bor <- ggplot(Centers, aes(x = Maximum.Capacity, 
+                                    color = Borough, 
+                                    fill = Borough)) +
+                geom_histogram(binwidth = 10,
+                               alpha = 0.3, 
+                               position = "identity")+ 
+                theme(plot.title = element_text(hjust = 0.5),
+                      legend.background = element_blank(),
+                      legend.position = c(0.85, 0.5)) + 
+                labs(title = "Histogram for Maximum Capacity (Colored by Borough)", 
+                     x = "Maximum Capacity",
+                     y = "Count")
+hist_Cap_Bor
+```
+
+The maximum capacity distribution is even more skewed, from the histogram with binwidth=10 plotted here, the median of the max capacity is 41 children and the 80% quantile is 94, displaying the same pattern with long tail.
+
+
+```{r}
+box_Cap_Bor <- ggplot(Centers, aes(y = Maximum.Capacity,
+                                   x = Borough,
+                                   fill = Borough, 
+                                   color = Borough)) + 
+               geom_boxplot(alpha = 0.3) +
+               theme(plot.title = element_text(hjust = 0.5),
+                      legend.background = element_blank(),
+                      legend.position = c(0.9, 0.7)) +
+               ggtitle("Boxplot for Maximum Capacity (Colored by Borough)") +
+               scale_y_continuous(name = "Maximum Capacity") + 
+               scale_x_discrete(name = "Borough")
+box_Cap_Bor
+```
+
+```{r}
+median(Centers$Maximum.Capacity)
+quantile(Centers$Maximum.Capacity, 0.8)
+```
+
+From above plots, we can portray the big picture for childcare industry: the largest bulk consists of small care units with 15 educational workers or less, tending less than 100 children maximum. These institutions serve their local community, but like the nature of education facilities, different needs always need to be tailored and catered. Larger institutions with more workers that can take care of more children always persists, making the entire distribution long-tailed.
+
+
+
+## 3 Statistical Testing
+
+### 3.1 Preparation for cor.test
+
+```{r, results='markup'}
+child2<-childcare[c("Inspection.Date","Violation.Rate.Percent","Borough")]
+child2 <- na.omit(child2)
+str(child2)
+```
+
+We will use cor.test to figure out Which borough has improved over the period (2018-2021). So, we deleted NA values and some unuseful variables which are unrelated to the question. We only need 3 variables such as Inspection.Date, Violation.Rate,Percent and Borough. There are `r nrow(child2)` observations and `r length(child2)` variables in this dataset which we called *child2*.
+
+```{r}
+child2$Inspection.Date<-substring(child2$Inspection.Date,nchar(as.character(child2$Inspection.Date))-3)
+```
+
+```{r, results='markup'}
+loadPkg("dplyr")
+d1<-child2 %>% group_by(Borough,Inspection.Date)%>% mutate(Violation.Rate.Percent=mean(Violation.Rate.Percent))
+# unique(d1)
+d1 <- unique(d1)
+xkabledply(d1, title = "Table: d1")
+```
+
+In child2, we have the violation rate for everyday in each Borough which we then took the average of the violation rates and created dataset *d1*. The *d1* contains the average violation rate for every year in each Borough.
+
+```{r, results='markup'}
+d1$Inspection.Date<-as.numeric(d1$Inspection.Date)
+d1$Violation.Rate.Percent<-as.numeric(d1$Violation.Rate.Percent)
+d1brokk<-subset(d1,Borough=="BROOKLYN")
+d1bqn<-subset(d1,Borough=="QUEENS")
+d1st<-subset(d1,Borough=="STATEN ISLAND")
+d1mn<-subset(d1,Borough=="MANHATTAN")
+d1brons<-subset(d1,Borough=="BRONX")
+xkabledply(d1brokk, title = "Table: Brooklyn")
+xkabledply(d1bqn, title = "Table: Queens")
+xkabledply(d1st, title = "Table: Staten Island")
+xkabledply(d1mn, title = "Table: Manhattan")
+xkabledply(d1brons, title = "Table: Bronx")
+```
+
+We wanted to study the changes in violation rates in 5 different boroughs, so we divide them into 5 subsets, namely Brooklyn, Queens, Staten Island, Manhattan, and Bronx. Then, we used cor.test to study the correlation between inspection date and violation rate in five boroughs.
+
+### 3.2 Cor.test
+```{r, results='markup'}
+c1<-cor.test(d1brokk$Inspection.Date,d1brokk$Violation.Rate.Percent, na.action = na.omit)
+c1
+```
+```{r, results='markup'}
+c2<-cor.test(d1bqn$Inspection.Date,d1bqn$Violation.Rate.Percent, na.action = na.omit)
+c2
+```
+
+```{r, results='markup'}
+c3<-cor.test(d1st$Inspection.Date,d1st$Violation.Rate.Percent, na.action = na.omit)
+c3
+```
+
+```{r,results='markup'}
+c4<-cor.test(d1mn$Inspection.Date,d1mn$Violation.Rate.Percent, na.action = na.omit)
+c4
+```
+
+```{r, results='markup'}
+c5<-cor.test(d1brons$Inspection.Date,d1brons$Violation.Rate.Percent, na.action = na.omit)
+c5
+```
+
+From cor.test, the p-value of Brooklyn, Staten Island and Bronx are greater than 0.05, so there are no correlation between inspection date and violation rate in the three boroughs. In Queens, there is a strong negative correlation because the p-value is less than 0.05 and cor is -o.986. In Manhattan, there is a strong negative correlation too because the p-value is equal to 0.05 and cor is -0.986.
+
+### 3.3 Violation Rate percent vs. Inspection date across Borough
+```{r}
+# install.packages("ggthemes") Install 
+library(ggthemes)
+```
+
+
+```{r}
+loadPkg("ggplot2")
+ggplot(d1,aes(x=Inspection.Date,y=Violation.Rate.Percent,group=Borough,color=Borough))+geom_point(size=2,color='red')+geom_line(size=1)+ggtitle("Violation Rate percent vs. Inspection date across Borough")+theme_stata() + scale_color_stata() 
+```
+
+From the above ggplot, we can intuitively see the changes in violation rates in the five boroughs over the years.We can see there is no statistically significant in Brooklyn, Staten Island and Bronx. While Queens and Manhattan have good correlation, which says that the violation rate is decreasing over the years.The visualization above proves the test results. The improvement means the decrease in violation rate as the inspection year increases. Therefore, Queens and Manhattan have improved over the period (2018-2021).,
+
+## 4 Model Building
+
+### 4.1 Correlation Matrix
+
+```{r}
+library(corrplot)
+violation = childcare %>% subset(select = c(Violation.Rate.Percent, Total.Educational.Workers, Public.Health.Hazard.Violation.Rate, Critical.Violation.Rate, Maximum.Capacity))
+corr_violation = cor(violation, use = "complete.obs")
+corrplot(corr_violation, method = 'number')
+```
+
+We only look for the correlation of numeric variables in *childcare* dataset, so we use the numeric variables information in this dataset to get the above correlation matrix. We can see there is a strong correlation between Violation.Rate.Percent and Critical.Violation.Rate. And there is a moderate correlation between Violation.Rate.Percent and Public.Health.Hazard.Violation.Rate, Public.Health.Hazard.Violation.Rate and Critical.Violation.Rate and Maximum.Capacity and Total.Educational.Workers.
+
+
+### 4.2 Generalized Linear Model
+
+```{r}
+#Step 5 - Generalized linear model for predicting if inspection will lead to a violation being cited or not
+loadPkg("dplyr")
+# Remove unnecessary columns and create column called Violation.Flag to show if inspection has resulted in a violation or not
+glm_childcare <- childcare %>% subset(select = -c(Date.Permitted))
+glm_childcare = glm_childcare %>% mutate(Violation.Flag = ifelse(is.na(Violation.Category), 0, 1))
+# Remove/replace NAs with desired values in each column
+glm_childcare$Violation.Category[is.na(glm_childcare$Violation.Category)] <- 'NO VIOLATION'
+glm_childcare$Violation.Rate.Percent[is.na(glm_childcare$Violation.Rate.Percent)] <- 0
+glm_childcare$Average.Violation.Rate.Percent[is.na(glm_childcare$Average.Violation.Rate.Percent)] <- 0
+glm_childcare$Public.Health.Hazard.Violation.Rate[is.na(glm_childcare$Public.Health.Hazard.Violation.Rate)] <- 0
+glm_childcare$Average.Public.Health.Hazard.Violation.Rate[is.na(glm_childcare$Average.Public.Health.Hazard.Violation.Rate)] <- 0
+glm_childcare$Violation.Rate.Percent[is.na(glm_childcare$Violation.Rate.Percent)] <- 0
+glm_childcare$Average.Violation.Rate.Percent[is.na(glm_childcare$Average.Violation.Rate.Percent)] <- 0
+glm_childcare$Critical.Violation.Rate[is.na(glm_childcare$Critical.Violation.Rate)] <- 0
+glm_childcare$Average.Critical.Violation.Rate[is.na(glm_childcare$Average.Critical.Violation.Rate)] <- 0
+glm_childcare <- glm_childcare %>% filter(!is.na(Inspection.Date))
+# Check if dataset has any NA values
+sapply(glm_childcare,function(x) sum(is.na(x)))
+# Convert categorical variables to required datatype
+glm_childcare$Program.Type <- as.factor(glm_childcare$Program.Type)
+glm_childcare$Borough <- as.factor(glm_childcare$Borough)
+glm_childcare$Status <- as.factor(glm_childcare$Status)
+glm_childcare$Program.Type <- as.factor(glm_childcare$Program.Type)
+glm_childcare$Facility.Type <- as.factor(glm_childcare$Facility.Type)
+glm_childcare$Child.Care.Type <- as.factor(glm_childcare$Child.Care.Type)
+glm_childcare$Violation.Category <- as.factor(glm_childcare$Violation.Category)
+glm_childcare$Violation.Status <- as.factor(glm_childcare$Violation.Status)
+glm_childcare$Violation.Flag <- as.factor(glm_childcare$Violation.Flag)
+# Randomize test and train datasets (90:10)
+glm_childcare
+require(caTools)
+set.seed(1000) 
+sample = sample.split(glm_childcare, SplitRatio = .90)
+train = subset(glm_childcare, sample == TRUE)
+test  = subset(glm_childcare, sample == FALSE)
+```
+```{r, results='markup'}
+# GLM model training
+model <- glm(Violation.Flag ~ Public.Health.Hazard.Violation.Rate + Critical.Violation.Rate + Borough, family=binomial, data=train)
+# summary(model)
+xkabledply(model)
+```
+In above model, the *Public.Health.Hazard.Violation*, *Critical.Violation.Rate*, *BoroughBROOKLYN*, *BoroughQUEENS* and *BoroughSTATEN ISLAND* are statistically significant because their p-value are less than 0.05. And the *BoroughMANHATTAN* is not statistically significant because its p-value are greater than 0.05.   
+ 
+```{r, results='markup'}
+# VIF check for collinearity (Remove multicollinear factors eg: Violation.Rate.Percent has a strong positive correlation with Critical.Violation.Rate.Percent)
+xkablevif(model)
+```
+In the model, the output above shows that the VIF value for all variables exceed 5, so there is high multicollinearity among these factors.
+
+## 5 Conclution
+
+In the end, through a series of data analysis, we solved our Smart questions. Due to population size, there are fewer childcare centers in Staten Island and BRONX. Due to differences in regional functionality, there are fewer childcare centers in Manhattan and Queens than in Brooklyn. Analyzing the distribution of the types of violations, we found that more than half of the violations occurred in 2018-2021. Therefore, childcare center violations in New York City are still relatively serious, and we hope it improves in the future. Comparing the changes in the violation rates of the five boroughs, we found that the violation rates in Manhattan and Queens both decreased with the inspection, which shows that the inspection has played a significant role in the childcare centers in the two boroughs.
+
+## 6 Bibliography
+
+Data Source: https://data.cityofnewyork.us/Health/DOHMH-Childcare-Center-Inspections/dsg6-ifza
+
+
+
