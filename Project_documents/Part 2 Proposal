@@ -1,0 +1,21 @@
+DATS 6101 - Project Proposal on Telecom Industry Customer Churn Prediction
+Team 6:
+1.        	Yaqian Lin
+2.        	Adina Dingankar
+3.        	Ashwin Arun Dixit
+4.        	Deyu Kong
+5.        	Rehapriadarsini Manikandasamy
+Project Description:
+One of the most important goals of any telecommunication business is to maximize the number of customers. To achieve this, it is important not only to try to attract new customers but also to retain existing ones. Also, retaining old customers costs less than attracting new customers. By predicting the customer churn, the business can react in time and try to keep the customers who are most likely to leave. The business can do so by making special offers to such customers in order to retain them.
+The data contains information of a little short of six thousand users, on their demographics, the services subscribed, the duration of using the operator's services, the method of payment, and the amount of payment.
+SMART Questions:
+Our team will be focussing on the following SMART questions in this project:
+1.        	How big is the proportion of customers who are using Phone and Internet service at the same time?
+2.        	Does the type of service used, amount of time a customer spends in the system (tenure), type of contract, and bill being charged affect churn?
+3.        	Find the likelihood of customers terminate their contract based on their past subscription and payment history, test the model performance and will a Typical Student User(will later be defined) to renew his contract?
+Data Source:
+This data is uploaded by Radmir Zosimov on Kaggle.com:
+https://www.kaggle.com/radmirzosimov/telecom-users-dataset
+GitHub:
+The project work progress will be committed to the following GitHub repo:
+https://github.com/adingankar/DATASCIENCE_6101
