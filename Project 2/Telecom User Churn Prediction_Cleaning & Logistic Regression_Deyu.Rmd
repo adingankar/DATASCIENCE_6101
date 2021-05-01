@@ -1,0 +1,397 @@
+---
+title: "Telecom User Churn Prediction"
+author: "KONG Deyu"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    code_folding: hide
+    # number_sections: true
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+# some of common options (and the defaults) are: 
+# include=T, eval=T, echo=T, results='hide'/'asis',..., collapse=F, warning=T, message=T, error=T, cache=T, fig.width=6, fig.height=4, fig.dim=c(6,4) #inches, fig.align='left'/'center','right', 
+knitr::opts_chunk$set(warning = F, results = 'markup', message = F)
+# knitr::opts_chunk$set(warning = F, results = 'hide', message = F)
+# knitr::opts_chunk$set(include = F)
+# knitr::opts_chunk$set(echo = TRUE)
+options(scientific=T, digits = 3) 
+# options(scipen=9, digits = 3) 
+# ‘scipen’: integer. A penalty to be applied when deciding to print numeric values in fixed or exponential notation.  Positive values bias towards fixed and negative towards scientific notation: fixed notation will be preferred unless it is more than ‘scipen’ digits wider.
+# use scipen=999 to prevent scientific notation at all times
+```
+
+```{r basic, include=F}
+# use this function to conveniently load libraries and work smoothly with knitting
+# can add quietly=T option to the require() function
+loadPkg = function(pkg, character.only = FALSE) { 
+  if (!character.only) { pkg <- as.character(substitute(pkg)) }
+  pkg <- ifelse(!character.only, as.character(substitute(pkg)) , pkg)  
+  if (!require(pkg,character.only=T, quietly =T)) {  install.packages(substitute(pkg),dep=T); if(!require(pkg,character.only=T)) stop("Package not found") } 
+}
+loadPkg(knitr)
+
+# unload/detact package when done using it
+unloadPkg = function(pkg, character.only = FALSE) { 
+  if(!character.only) { pkg <- as.character(substitute(pkg)) } 
+  search_item <- paste("package", pkg,sep = ":") 
+  while(search_item %in% search()) { detach(search_item, unload = TRUE, character.only = TRUE) } 
+}
+
+loadPkg("xtable")
+loadPkg("kableExtra")
+loadPkg("stringi")
+
+xkabledply = function(modelsmmrytable, title="Table", digits = 4, pos="left", bso="striped", wide=FALSE) { 
+  #' Combining base::summary, xtable, and kableExtra, to easily display model summary. 
+  #' wrapper for the base::summary function on model objects
+  #' Can also use as head for better display
+  #' ELo 202004 GWU DATS
+  #' version 1.2
+  #' @param modelsmmrytable This can be a generic table, a model object such as lm(), or the summary of a model object summary(lm()) 
+  #' @param title Title of table. 
+  #' @param digits Number of digits to display
+  #' @param pos Position of table, c("left","center","right") 
+  #' @param bso bootstrap_options = c("basic", "striped", "bordered", "hover", "condensed", "responsive")
+  #' @param wide print table in long (FALSE) format or wide (TRUE) format
+  #' @return HTML table for display
+  #' @examples
+  #' library("xtable")
+  #' library("kableExtra")
+  #' xkabledply( df, title="Table testing", pos="left", bso="hover" )
+  #' xkabledply( ISLR::Hitters[1:5,] )
+  if (wide) { modelsmmrytable <- t(modelsmmrytable) }
+  modelsmmrytable %>%
+    xtable() %>% 
+    kable(caption = title, digits = digits) %>%
+    kable_styling(bootstrap_options = bso, full_width = FALSE, position = pos)
+}
+
+xkabledplyhead = function(df, rows=5, title="Head", digits = 4, pos="left", bso="striped") { 
+  xkabledply(df[1:rows, ], title, digits, pos, bso, wide=FALSE)
+}
+
+xkabledplytail = function(df, rows=5, title="Tail", digits = 4, pos="left", bso="striped") { 
+  trows = nrow(df)
+  xkabledply(df[ (trows-rows+1) : trows, ], title, digits, pos, bso, wide=FALSE)
+}
+
+xkablesummary = function(df, title="Table: Statistics summary.", digits = 4, pos="left", bso="striped") { 
+  #' Combining base::summary, xtable, and kableExtra, to easily display numeric variable summary of dataframes. 
+  #' ELo 202004 GWU DATS
+  #' version 1.2
+  #' @param df The dataframe.
+  #' @param title Title of table. 
+  #' @param digits Number of digits to display
+  #' @param pos Position of table, c("left","center","right") 
+  #' @param bso bootstrap_options = c("basic", "striped", "bordered", "hover", "condensed", "responsive")
+  #' @return The HTML summary table for display, or for knitr to process into other formats 
+  #' @examples
+  #' xkablesummary( faraway::ozone )
+  #' xkablesummary( ISLR::Hitters, title="Five number summary", pos="left", bso="hover"  )
+  
+  s = summary(df) %>%
+    apply( 2, function(x) stringr::str_remove_all(x,c("Min.\\s*:\\s*","1st Qu.\\s*:\\s*","Median\\s*:\\s*","Mean\\s*:\\s*","3rd Qu.\\s*:\\s*","Max.\\s*:\\s*")) ) %>% # replace all leading words
+    apply( 2, function(x) stringr::str_trim(x, "right")) # trim trailing spaces left
+  
+  colnames(s) <- stringr::str_trim(colnames(s))
+  
+  if ( dim(s)[1] ==6 ) { rownames(s) <- c('Min','Q1','Median','Mean','Q3','Max') 
+  } else if ( dim(s)[1] ==7 ) { rownames(s) <- c('Min','Q1','Median','Mean','Q3','Max','NA') }
+  
+  xkabledply(s, title=title, digits = digits, pos=pos, bso=bso )
+}
+
+xkablevif = function(model, title="VIFs of the model", digits = 3, pos="left", bso="striped", wide=TRUE) { 
+  #' Combining faraway::vif, xtable, and kableExtra, to easily display numeric summary of VIFs for a model. 
+  #' ELo 202004 GWU DATS
+  #' version 1.2
+  #' @param model The lm or compatible model object.
+  #' @param title Title of table. 
+  #' @param digits Number of digits to display
+  #' @param pos Position of table, c("left","center","right") 
+  #' @param bso bootstrap_options = c("basic", "striped", "bordered", "hover", "condensed", "responsive")
+  #' @param wide print table in long (FALSE) format or wide (TRUE) format
+  #' @return The HTML summary table of the VIFs for a model for display, or for knitr to process into other formats 
+  #' @examples
+  #' xkablevif( lm(Salary~Hits+RBI, data=ISLR::Hitters), wide=T )
+  
+  vifs = table( names(model$coefficients)[2:length(model$coefficients)] ) # remove intercept to set column names
+  vifs[] = faraway::vif(model) # set the values
+  if (wide) { vifs <- t(vifs) }
+  xkabledply( vifs, title=title, digits = digits, pos=pos, bso=bso )
+}
+```
+
+
+```{r}
+data_raw <- read.csv("telecom_users.csv")
+summary(data_raw)
+head(data_raw)
+```
+
+
+# Preliminary Data Cleaning
+
+How many N/A are there?
+```{r}
+data_raw[!complete.cases(data_raw),]
+```
+
+10 Missing Values in `TotalCharges` column. We can drop them.
+```{r}
+df <- na.omit(data_raw)
+nrow(df)
+```
+
+We don't need customer ID. Drop first two columns
+```{r}
+df <- df[3:22]
+head(df)
+```
+
+
+Encode `SeniorCitizen` status to factor for regression, and `Churn` to binary
+```{r}
+df$SeniorCitizen <- ifelse(df$SeniorCitizen == 1, "Yes", "No")
+df$Churn <- ifelse(df$Churn == "Yes", 1, 0)
+```
+
+
+```{r}
+df_Churn <- with(df, subset(df, Churn == 1))
+nrow(df_Churn)
+df_Stay <- with(df, subset(df, Churn == 0))
+nrow(df_Stay)
+```
+
+Does `TotalCharges` affect Churn decision?
+```{r}
+t.test(df_Churn$TotalCharges, df_Stay$TotalCharges)
+```
+
+Does `tenure` affect Churn decision?
+```{r}
+t.test(df_Churn$tenure, df_Stay$tenure)
+```
+
+Does the type of `Contract` affect Churn decision?
+```{r}
+chisq.test(xtabs(~ Churn + Contract, data = df))
+```
+
+`gender`?
+```{r}
+chisq.test(xtabs(~ Churn + gender, data = df))
+```
+
+`SeniorCitizen`?
+```{r}
+chisq.test(xtabs(~ Churn + SeniorCitizen, data = df))
+```
+
+`Partner`?
+```{r}
+chisq.test(xtabs(~ Churn + Partner, data = df))
+```
+
+`Dependents`?
+```{r}
+chisq.test(xtabs(~ Churn + Dependents, data = df))
+```
+
+
+
+Model Building:
+```{r}
+glm1 <- glm(Churn ~ TotalCharges + tenure + Contract, data = df, family = "binomial")
+summary(glm1)
+```
+
+```{r}
+coef_glm1 <- exp(coef(glm1))
+coef_glm1
+```
+
+Obviously, higher the charges, the more likely customer churn. Long term customer have better loyalty.
+
+Model Evaluation: Confusion Matrix
+```{r}
+loadPkg("caret")
+pred1 <- fitted(glm1)
+pred1 <- ifelse(pred1 > 0.5, 1, 0) %>% factor()
+confusionMatrix(data = pred1, factor(df$Churn))
+```
+
+Hosmer and Lemeshow test
+```{r}
+loadPkg("ResourceSelection")
+hoslem.test(df$Churn, fitted(glm1))
+```
+
+Obviously, our model is not good enough
+
+```{r}
+loadPkg("pROC")
+prob1 <- predict(glm1, type = "response")
+df$prob <- prob1
+h1 <- roc(Churn ~ prob, data = df)
+auc(h1)
+plot(h1)
+```
+
+AUC of 0.819, we can improve from here.
+
+McFadden
+```{r}
+loadPkg("pscl")
+pR2_glm1 <- pR2(glm1)
+pR2_glm1[4]
+```
+
+Are people more sensitive to marginal(Monthly) expense?
+```{r}
+glm2 <- glm(Churn ~ MonthlyCharges + tenure + Contract, data = df, family = "binomial")
+summary(glm2)
+```
+
+```{r}
+coef_glm2 <- exp(coef(glm2))
+coef_glm2
+```
+
+
+Does Phone and Internet Services affect `Churn` Decision?
+```{r}
+glm3 <- glm(Churn ~ MonthlyCharges + tenure + Contract + PhoneService + InternetService, data = df, family = "binomial")
+summary(glm3)
+```
+
+
+```{r}
+coef_glm3 <- exp(coef(glm3))
+coef_glm3
+```
+
+Fiber internet service must be laggy and expensive. So many customers are leaving after using it.
+
+Again, Model evaluations:
+Confusion Matrix
+```{r}
+pred3 <- fitted(glm3)
+pred3 <- ifelse(pred3 > 0.5, 1, 0) %>% factor()
+confusionMatrix(data = pred3, factor(df$Churn))
+```
+
+Hosmer and Lemeshow test
+```{r}
+hoslem.test(df$Churn, fitted(glm3))
+```
+
+Still not good enough
+
+```{r}
+prob3 <- predict(glm3, type = "response" )
+df$prob <- prob3
+h3 <- roc(Churn ~ prob, data = df)
+auc(h3)
+plot(h3)
+```
+
+Some improvement.
+
+McFadden
+```{r}
+pR2_glm3 <- pR2(glm3)
+pR2_glm3[4]
+```
+
+
+```{r}
+glm4 <- glm(Churn ~ MonthlyCharges + tenure + Contract + PhoneService + InternetService + SeniorCitizen + Partner + Dependents, data = df, family = "binomial")
+summary(glm4)
+```
+
+
+```{r}
+glm5 <- glm(Churn ~ MonthlyCharges + tenure + Contract + PhoneService + MultipleLines + InternetService + OnlineSecurity + OnlineBackup + DeviceProtection + TechSupport + StreamingTV + StreamingMovies + SeniorCitizen, data = df, family = "binomial")
+summary(glm5)
+```
+
+
+```{r}
+glm6 <- glm(Churn ~ MonthlyCharges + tenure + Contract + PhoneService + MultipleLines + InternetService + PaperlessBilling + PaymentMethod + SeniorCitizen, data = df, family = "binomial")
+summary(glm6)
+```
+
+```{r}
+coef_glm6 <- exp(coef(glm6))
+coef_glm6
+```
+
+Again, Model evaluations:
+Confusion Matrix
+```{r}
+pred6 <- fitted(glm6)
+pred6 <- ifelse(pred6 > 0.5, 1, 0) %>% factor()
+confusionMatrix(data = pred6, factor(df$Churn))
+```
+
+Hosmer and Lemeshow test
+```{r}
+hoslem.test(df$Churn, fitted(glm6))
+```
+
+p-value big enough
+
+```{r}
+prob6 <- predict(glm6, type = "response" )
+df$prob <- prob6
+h6 <- roc(Churn ~ prob, data = df)
+auc(h6)
+plot(h6)
+```
+
+Some improvement.
+
+McFadden
+```{r}
+pR2_glm6 <- pR2(glm6)
+pR2_glm6[4]
+```
+
+Finnaly, compare to full model. Does full model performs better?
+```{r}
+glmF <- glm(Churn ~ ., data = df, family = "binomial")
+summary(glmF)
+```
+
+```{r}
+predF <- fitted(glmF)
+predF <- ifelse(predF > 0.5, 1, 0) %>% factor()
+confusionMatrix(data = predF, factor(df$Churn))
+```
+
+```{r}
+probF <- predict(glmF, type = "response" )
+df$prob <- probF
+hF <- roc(Churn ~ prob, data = df)
+auc(hF)
+plot(hF)
+```
+
+```{r}
+pR2_glmF <- pR2(glmF)
+pR2_glmF[4]
+```
+
+Summary: Full model improves prediction accuracy and False Negative rates, improves pseudo $R^2$ and `AUC`, but harms interpretation.
+
+
+
