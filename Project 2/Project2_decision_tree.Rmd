@@ -1,0 +1,258 @@
+---
+title: "Project2_decision_tree"
+author: "Reha"
+date: "02/05/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# some of common options (and the defaults) are: 
+# include=T, eval=T, echo=T, results='hide'/'asis',..., collapse=F, warning=T, message=T, error=T, cache=T, fig.width=6, fig.height=4, fig.dim=c(6,4) #inches, fig.align='left'/'center','right', 
+knitr::opts_chunk$set(warning = F, results = 'markup', message = F)
+# knitr::opts_chunk$set(warning = F, results = 'hide', message = F)
+# knitr::opts_chunk$set(include = F)
+# knitr::opts_chunk$set(echo = TRUE)
+options(scientific=T, digits = 3) 
+# options(scipen=9, digits = 3) 
+# ‘scipen’: integer. A penalty to be applied when deciding to print numeric values in fixed or exponential notation.  Positive values bias towards fixed and negative towards scientific notation: fixed notation will be preferred unless it is more than ‘scipen’ digits wider.
+# use scipen=999 to prevent scientific notation at all times
+```
+
+```{r basic, include=F}
+# use this function to conveniently load libraries and work smoothly with knitting
+# can add quietly=T option to the require() function
+loadPkg = function(pkg, character.only = FALSE) { 
+  if (!character.only) { pkg <- as.character(substitute(pkg)) }
+  pkg <- ifelse(!character.only, as.character(substitute(pkg)) , pkg)  
+  if (!require(pkg,character.only=T, quietly =T)) {  install.packages(substitute(pkg),dep=T); if(!require(pkg,character.only=T)) stop("Package not found") } 
+}
+loadPkg(knitr)
+# unload/detact package when done using it
+unloadPkg = function(pkg, character.only = FALSE) { 
+  if(!character.only) { pkg <- as.character(substitute(pkg)) } 
+  search_item <- paste("package", pkg,sep = ":") 
+  while(search_item %in% search()) { detach(search_item, unload = TRUE, character.only = TRUE) } 
+}
+loadPkg("xtable")
+loadPkg("kableExtra")
+loadPkg("stringi")
+xkabledply = function(modelsmmrytable, title="Table", digits = 4, pos="left", bso="striped", wide=FALSE) { 
+  #' Combining base::summary, xtable, and kableExtra, to easily display model summary. 
+  #' wrapper for the base::summary function on model objects
+  #' Can also use as head for better display
+  #' ELo 202004 GWU DATS
+  #' version 1.2
+  #' @param modelsmmrytable This can be a generic table, a model object such as lm(), or the summary of a model object summary(lm()) 
+  #' @param title Title of table. 
+  #' @param digits Number of digits to display
+  #' @param pos Position of table, c("left","center","right") 
+  #' @param bso bootstrap_options = c("basic", "striped", "bordered", "hover", "condensed", "responsive")
+  #' @param wide print table in long (FALSE) format or wide (TRUE) format
+  #' @return HTML table for display
+  #' @examples
+  #' library("xtable")
+  #' library("kableExtra")
+  #' xkabledply( df, title="Table testing", pos="left", bso="hover" )
+  #' xkabledply( ISLR::Hitters[1:5,] )
+  if (wide) { modelsmmrytable <- t(modelsmmrytable) }
+  modelsmmrytable %>%
+    xtable() %>% 
+    kable(caption = title, digits = digits) %>%
+    kable_styling(bootstrap_options = bso, full_width = FALSE, position = pos)
+}
+xkabledplyhead = function(df, rows=5, title="Head", digits = 4, pos="left", bso="striped") { 
+  xkabledply(df[1:rows, ], title, digits, pos, bso, wide=FALSE)
+}
+xkabledplytail = function(df, rows=5, title="Tail", digits = 4, pos="left", bso="striped") { 
+  trows = nrow(df)
+  xkabledply(df[ (trows-rows+1) : trows, ], title, digits, pos, bso, wide=FALSE)
+}
+xkablesummary = function(df, title="Table: Statistics summary.", digits = 4, pos="left", bso="striped") { 
+  #' Combining base::summary, xtable, and kableExtra, to easily display numeric variable summary of dataframes. 
+  #' ELo 202004 GWU DATS
+  #' version 1.2
+  #' @param df The dataframe.
+  #' @param title Title of table. 
+  #' @param digits Number of digits to display
+  #' @param pos Position of table, c("left","center","right") 
+  #' @param bso bootstrap_options = c("basic", "striped", "bordered", "hover", "condensed", "responsive")
+  #' @return The HTML summary table for display, or for knitr to process into other formats 
+  #' @examples
+  #' xkablesummary( faraway::ozone )
+  #' xkablesummary( ISLR::Hitters, title="Five number summary", pos="left", bso="hover"  )
+  
+  s = summary(df) %>%
+    apply( 2, function(x) stringr::str_remove_all(x,c("Min.\\s*:\\s*","1st Qu.\\s*:\\s*","Median\\s*:\\s*","Mean\\s*:\\s*","3rd Qu.\\s*:\\s*","Max.\\s*:\\s*")) ) %>% # replace all leading words
+    apply( 2, function(x) stringr::str_trim(x, "right")) # trim trailing spaces left
+  
+  colnames(s) <- stringr::str_trim(colnames(s))
+  
+  if ( dim(s)[1] ==6 ) { rownames(s) <- c('Min','Q1','Median','Mean','Q3','Max') 
+  } else if ( dim(s)[1] ==7 ) { rownames(s) <- c('Min','Q1','Median','Mean','Q3','Max','NA') }
+  
+  xkabledply(s, title=title, digits = digits, pos=pos, bso=bso )
+}
+xkablevif = function(model, title="VIFs of the model", digits = 3, pos="left", bso="striped", wide=TRUE) { 
+  #' Combining faraway::vif, xtable, and kableExtra, to easily display numeric summary of VIFs for a model. 
+  #' ELo 202004 GWU DATS
+  #' version 1.2
+  #' @param model The lm or compatible model object.
+  #' @param title Title of table. 
+  #' @param digits Number of digits to display
+  #' @param pos Position of table, c("left","center","right") 
+  #' @param bso bootstrap_options = c("basic", "striped", "bordered", "hover", "condensed", "responsive")
+  #' @param wide print table in long (FALSE) format or wide (TRUE) format
+  #' @return The HTML summary table of the VIFs for a model for display, or for knitr to process into other formats 
+  #' @examples
+  #' xkablevif( lm(Salary~Hits+RBI, data=ISLR::Hitters), wide=T )
+  
+  vifs = table( names(model$coefficients)[2:length(model$coefficients)] ) # remove intercept to set column names
+  vifs[] = faraway::vif(model) # set the values
+  if (wide) { vifs <- t(vifs) }
+  xkabledply( vifs, title=title, digits = digits, pos=pos, bso=bso )
+}
+```
+
+
+```{r}
+data_raw <-data.frame(read.csv("telecom_users (1).csv"))
+summary(data_raw)
+head(data_raw)
+```
+
+
+# Preliminary Data Cleaning
+
+How many N/A are there?
+```{r}
+data_raw[!complete.cases(data_raw),]
+```
+
+10 Missing Values in `TotalCharges` column. We can drop them.
+```{r}
+telco_data <- na.omit(data_raw)
+nrow(telco_data)
+```
+
+We don't need customer ID. Drop first two columns
+```{r}
+telco_data <- telco_data[3:22]
+head(teleco_data)
+```
+
+
+Let's convert variables into factors
+```{r}
+telco_data$gender <- as.factor(telco_data$gender)
+telco_data$SeniorCitizen <- as.factor(telco_data$SeniorCitizen)
+telco_data$Partner <- as.factor(telco_data$Partner)
+telco_data$Dependents <- as.factor(telco_data$Dependents)
+telco_data$PhoneService <- as.factor(telco_data$PhoneService)
+telco_data$MultipleLines <- as.factor(telco_data$MultipleLines)
+telco_data$InternetService <- as.factor(telco_data$InternetService)
+telco_data$OnlineSecurity <- as.factor(telco_data$OnlineSecurity)
+telco_data$OnlineBackup <- as.factor(telco_data$OnlineBackup)
+telco_data$DeviceProtection <- as.factor(telco_data$DeviceProtection)
+telco_data$TechSupport <- as.factor(telco_data$TechSupport)
+telco_data$StreamingTV <- as.factor(telco_data$StreamingTV)
+telco_data$StreamingMovies <- as.factor(telco_data$StreamingMovies)
+telco_data$Contract <- as.factor(telco_data$Contract)
+telco_data$PaperlessBilling <- as.factor(telco_data$PaperlessBilling)
+telco_data$PaymentMethod <- as.factor(telco_data$PaymentMethod)
+telco_data$Churn <- as.factor(telco_data$Churn)
+```
+
+Decision Tree:
+```{r results='markup'}
+set.seed(1)
+treefit1<-rpart(Churn ~., data=telco_data, method="class",control = list(maxdepth = 5) )
+```
+```{r}
+printcp(treefit1) # display the results 
+plotcp(treefit1) # visualize cross-validation results 
+summary(treefit1) # detailed summary of splits
+```
+```{r}
+plot(treefit1, uniform=TRUE, main="Classification Tree for Churn")
+text(treefit1, use.n=TRUE, all=TRUE, cex=.8)
+```
+```{r}
+post(treefit1, file = "decisionTree1.ps", title = "Classification Tree for Churn")
+```
+
+```{r}
+loadPkg("rpart")
+loadPkg("rpart.plot")
+rpart.plot(treefit1)
+```
+
+So here are the results. 
+We see that at the first branching point, there are 4389 no and   1587 yes(with churn). The first split yields 2707 outcomes with contract= one or two years and 3269 outcomes with contract= month to month. 
+
+We can also use some handy library to calculate these percentages in the confusion matrix.
+
+
+```{r}
+loadPkg("caret") 
+cm = confusionMatrix( predict(treefit1, type = "class"), reference = telco_data[, "Churn"] )
+print('Overall: ')
+cm$overall
+print('Class: ')
+cm$byClass
+unloadPkg("caret")
+```
+
+
+```{r}
+xkabledply(cm$table, "confusion matrix")
+```
+Let us try different different maxdepths, and collect the result summaries for display.
+```{r}
+loadPkg("rpart")
+loadPkg("caret")
+
+
+# create an empty dataframe to store the results from confusion matrices
+confusionMatrixResultDf = data.frame( Depth=numeric(0), Accuracy= numeric(0), Sensitivity=numeric(0), Specificity=numeric(0), Pos.Pred.Value=numeric(0), Neg.Pred.Value=numeric(0), Precision=numeric(0), Recall=numeric(0), F1=numeric(0), Prevalence=numeric(0), Detection.Rate=numeric(0), Detection.Prevalence=numeric(0), Balanced.Accuracy=numeric(0), row.names = NULL )
+
+for (deep in 2:10) {
+  treefit2 <- rpart(Churn ~., data=telco_data, method="class", control = list(maxdepth = deep) )
+  # 
+  cm = confusionMatrix( predict(treefit2, type = "class"), reference = telco_data[, "Churn"] ) # from caret library
+  # 
+  cmaccu = cm$overall['Accuracy']
+  # print( paste("Total Accuracy = ", cmaccu ) )
+  # 
+  cmt = data.frame(Depth=deep, Accuracy = cmaccu, row.names = NULL ) # initialize a row of the metrics 
+  cmt = cbind( cmt, data.frame( t(cm$byClass) ) ) # the dataframe of the transpose, with k valued added in front
+  confusionMatrixResultDf = rbind(confusionMatrixResultDf, cmt)
+  # print("Other metrics : ")
+}
+
+unloadPkg("caret")
+```
+```{r}
+xkabledply(confusionMatrixResultDf, title="churn Classification Trees summary with varying MaxDepth")
+```
+
+The model's accuracy is not improving even when the depth is increased.
+
+```{r}
+loadPkg("rattle")
+fancyRpartPlot(treefit1)
+```
+
+
+Let's prune the model to understand the optimal decision tree for the dataset.
+```{r}
+#prune the tree 
+ptree <- prune(treefit1, cp = treefit1$cptable[2,"CP"])
+
+
+# plot the pruned tree 
+fancyRpartPlot(ptree)
+# For boring plot, use codes below instead
+plot(ptree, uniform=TRUE, main="Pruned Classification Tree for Churn")
+text(ptree, use.n=TRUE, all=TRUE, cex=.8)
+```
+
