@@ -1,0 +1,669 @@
+---
+title: "Telecom Industry Customer Churn Prediction"
+author: "Team Number: 6"
+date: "05/05/2021"
+# date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    gallery: false
+    highlight: tango
+  html_document:
+    code_folding: hide
+    # number_sections: true
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+# some of common options (and the defaults) are: 
+# include=T, eval=T, echo=T, results='hide'/'asis',..., collapse=F, warning=T, message=T, error=T, cache=T, fig.width=6, fig.height=4, fig.dim=c(6,4) #inches, fig.align='left'/'center','right', 
+knitr::opts_chunk$set(warning = F, results = 'markup', message = F)
+# knitr::opts_chunk$set(warning = F, results = 'hide', message = F)
+# knitr::opts_chunk$set(include = F)
+# knitr::opts_chunk$set(echo = TRUE)
+options(scientific=T, digits = 3) 
+# options(scipen=9, digits = 3) 
+# ‘scipen’: integer. A penalty to be applied when deciding to print numeric values in fixed or exponential notation.  Positive values bias towards fixed and negative towards scientific notation: fixed notation will be preferred unless it is more than ‘scipen’ digits wider.
+# use scipen=999 to prevent scientific notation at all times
+```
+
+```{r basic, include=F}
+# use this function to conveniently load libraries and work smoothly with knitting
+# can add quietly=T option to the require() function
+loadPkg = function(pkg, character.only = FALSE) { 
+  if (!character.only) { pkg <- as.character(substitute(pkg)) }
+  pkg <- ifelse(!character.only, as.character(substitute(pkg)) , pkg)  
+  if (!require(pkg,character.only=T, quietly =T)) {  install.packages(substitute(pkg),dep=T); if(!require(pkg,character.only=T)) stop("Package not found") } 
+}
+loadPkg(knitr)
+# unload/detact package when done using it
+unloadPkg = function(pkg, character.only = FALSE) { 
+  if(!character.only) { pkg <- as.character(substitute(pkg)) } 
+  search_item <- paste("package", pkg,sep = ":") 
+  while(search_item %in% search()) { detach(search_item, unload = TRUE, character.only = TRUE) } 
+}
+loadPkg("xtable")
+loadPkg("kableExtra")
+loadPkg("stringi")
+xkabledply = function(modelsmmrytable, title="Table", digits = 4, pos="left", bso="striped", wide=FALSE) { 
+  #' Combining base::summary, xtable, and kableExtra, to easily display model summary. 
+  #' wrapper for the base::summary function on model objects
+  #' Can also use as head for better display
+  #' ELo 202004 GWU DATS
+  #' version 1.2
+  #' @param modelsmmrytable This can be a generic table, a model object such as lm(), or the summary of a model object summary(lm()) 
+  #' @param title Title of table. 
+  #' @param digits Number of digits to display
+  #' @param pos Position of table, c("left","center","right") 
+  #' @param bso bootstrap_options = c("basic", "striped", "bordered", "hover", "condensed", "responsive")
+  #' @param wide print table in long (FALSE) format or wide (TRUE) format
+  #' @return HTML table for display
+  #' @examples
+  #' library("xtable")
+  #' library("kableExtra")
+  #' xkabledply( df, title="Table testing", pos="left", bso="hover" )
+  #' xkabledply( ISLR::Hitters[1:5,] )
+  if (wide) { modelsmmrytable <- t(modelsmmrytable) }
+  modelsmmrytable %>%
+    xtable() %>% 
+    kable(caption = title, digits = digits) %>%
+    kable_styling(bootstrap_options = bso, full_width = FALSE, position = pos)
+}
+xkabledplyhead = function(df, rows=5, title="Head", digits = 4, pos="left", bso="striped") { 
+  xkabledply(df[1:rows, ], title, digits, pos, bso, wide=FALSE)
+}
+xkabledplytail = function(df, rows=5, title="Tail", digits = 4, pos="left", bso="striped") { 
+  trows = nrow(df)
+  xkabledply(df[ (trows-rows+1) : trows, ], title, digits, pos, bso, wide=FALSE)
+}
+xkablesummary = function(df, title="Table: Statistics summary.", digits = 4, pos="left", bso="striped") { 
+  #' Combining base::summary, xtable, and kableExtra, to easily display numeric variable summary of dataframes. 
+  #' ELo 202004 GWU DATS
+  #' version 1.2
+  #' @param df The dataframe.
+  #' @param title Title of table. 
+  #' @param digits Number of digits to display
+  #' @param pos Position of table, c("left","center","right") 
+  #' @param bso bootstrap_options = c("basic", "striped", "bordered", "hover", "condensed", "responsive")
+  #' @return The HTML summary table for display, or for knitr to process into other formats 
+  #' @examples
+  #' xkablesummary( faraway::ozone )
+  #' xkablesummary( ISLR::Hitters, title="Five number summary", pos="left", bso="hover"  )
+  
+  s = summary(df) %>%
+    apply( 2, function(x) stringr::str_remove_all(x,c("Min.\\s*:\\s*","1st Qu.\\s*:\\s*","Median\\s*:\\s*","Mean\\s*:\\s*","3rd Qu.\\s*:\\s*","Max.\\s*:\\s*")) ) %>% # replace all leading words
+    apply( 2, function(x) stringr::str_trim(x, "right")) # trim trailing spaces left
+  
+  colnames(s) <- stringr::str_trim(colnames(s))
+  
+  if ( dim(s)[1] ==6 ) { rownames(s) <- c('Min','Q1','Median','Mean','Q3','Max') 
+  } else if ( dim(s)[1] ==7 ) { rownames(s) <- c('Min','Q1','Median','Mean','Q3','Max','NA') }
+  
+  xkabledply(s, title=title, digits = digits, pos=pos, bso=bso )
+}
+xkablevif = function(model, title="VIFs of the model", digits = 3, pos="left", bso="striped", wide=TRUE) { 
+  #' Combining faraway::vif, xtable, and kableExtra, to easily display numeric summary of VIFs for a model. 
+  #' ELo 202004 GWU DATS
+  #' version 1.2
+  #' @param model The lm or compatible model object.
+  #' @param title Title of table. 
+  #' @param digits Number of digits to display
+  #' @param pos Position of table, c("left","center","right") 
+  #' @param bso bootstrap_options = c("basic", "striped", "bordered", "hover", "condensed", "responsive")
+  #' @param wide print table in long (FALSE) format or wide (TRUE) format
+  #' @return The HTML summary table of the VIFs for a model for display, or for knitr to process into other formats 
+  #' @examples
+  #' xkablevif( lm(Salary~Hits+RBI, data=ISLR::Hitters), wide=T )
+  
+  vifs = table( names(model$coefficients)[2:length(model$coefficients)] ) # remove intercept to set column names
+  vifs[] = faraway::vif(model) # set the values
+  if (wide) { vifs <- t(vifs) }
+  xkabledply( vifs, title=title, digits = digits, pos=pos, bso=bso )
+}
+```
+
+## 1 Introduction
+
+One of the most important goals of any telecommunication business is to maximize the number of customers. To achieve this, it is important not only to try to attract new customers but also to retain existing ones. Also, retaining old customers costs less than attracting new customers. By predicting the customer churn, the business can react in time and try to keep the customers who are most likely to leave. The business can do so by making special offers to such customers in order to retain them.
+
+The data contains information of a little short of six thousand users, on their demographics, the services subscribed, the duration of using the operator's services, the method of payment, and the amount of payment.
+
+Therefore, our team will be focusing on the following SMART questions in this project:
+
+1. Do customer demographics, certain services, tenure, monthly charges affect churn?
+2. Can we reliably predict if a customer will churn using different Machine Learning algorithms? (Logistic Regression, Decision Tree Classification, KNN)
+
+Next, we will use exploratory data analysis(EDA), logistic regression, decision tree classification and KNN to solve our smart questions.
+
+
+## 2 Preprocessing and EDA
+
+### 2.1 Preprocessing
+
+```{r, results='markup'}
+telco_orig <- read.csv("telecom_users.csv")
+str(telco_orig)
+summary(telco_orig)
+head(telco_orig)
+```
+
+The above code is our original data set. There are `r nrow(telco_orig)` observations and `r length(telco_orig)` variables. We can see that some data here is meaningless and unneeded such as `X` and `customerID`. So we have to clean up the data before doing analysis.
+
+```{r, results='markup'}
+telco_orig[!complete.cases(telco_orig),]
+```
+
+There are 10 missing values in `TotalCharges` column. They are new users who haven't use the service for a full month and have not made to the point to decide on churning. We can drop these observations.
+
+```{r, results='markup'}
+telco_data <- na.omit(telco_orig)
+#nrow(telco_data)
+telco_data <- telco_data[3:22]
+str(telco_data)
+head(telco_data)
+```
+
+We don't need `X` and `customerID`. So we can drop first two columns, then we got a new data set. We have named it as `telco_data` which we will use it for later analysis(EDA). Now, there are only `r nrow(telco_data)` observations and `r length(telco_data)` variables.
+
+
+### 2.2 EDA
+
+```{r, results="markup"}
+loadPkg("dplyr")
+loadPkg("ggplot2")
+  telco_data %>% 
+    group_by(Churn) %>% 
+    summarise(Number = n()) %>%
+    mutate(Percent = prop.table(Number)*100) %>% 
+  ggplot(aes(Churn, Percent)) + 
+    geom_col(aes(fill = Churn)) +
+    labs(title = "Churn Percentage") +
+    geom_text(aes(label = sprintf("%.2f%%", Percent)), hjust = 0.01,vjust = -0.5, size = 4) +
+    theme_minimal()
+```
+
+From the graph above we notice that 26.56% of the customers from the dataset have stopping using the services offered by the Telecom company. Almost a third of customers churn, which is not a good sign.
+
+
+```{r, results="markup"}
+loadPkg("cowplot")
+options(repr.plot.width = 12, repr.plot.height = 8)
+plot_grid(ggplot(telco_data, aes(x=SeniorCitizen,fill=Churn))+ geom_bar(position = 'fill'),
+          ggplot(telco_data, aes(x=Partner,fill=Churn))+ geom_bar(position = 'fill'),
+          ggplot(telco_data, aes(x=Dependents,fill=Churn))+ geom_bar(position = 'fill'),
+          align = "v")
+```
+
+From the graphs above, we can see that Churn percentage is higher in the case of senior citizens. Customers with partners or dependents have a lower churn percentage compared to those who don't. The reason is that people with family members almost always have family packages. If you change companies, the whole family usually changes it together which is more troublesome than a single person changing.
+
+```{r, results="markup"}
+options(repr.plot.width =6, repr.plot.height = 2)
+ggplot(telco_data, aes(y= MonthlyCharges, x = "", fill = Churn)) + 
+geom_boxplot()+
+xlab(" ")
+```
+
+From the graph above, churn rate is higher for customers with high monthly charges. We can figure out the reasons for the high monthly charges and recommend packages that suit these customers to reduce their monthly charges in order to lower churn rates for them.
+
+```{r, results="markup"}
+telco_data %>% 
+  group_by(tenure, Churn) %>% 
+  summarise(Number = n()) %>% 
+  ggplot(aes(tenure, Number)) +
+  geom_line(aes(col = Churn)) +
+  labs(x = "Tenure (month)",
+       y = "Number of Customer",
+       title = "Churn Based on Tenure") +
+  scale_x_continuous(breaks = seq(0, 80, 10)) +
+  theme_minimal()
+```
+
+From the graph above, we notice that highest number of customers churn between 1-5 months of their tenure with the company. For new users of 1-5 months, these months are their trial period for this company. So these few months are very crucial for retaining new users. Therefore, the company should provide some preferential activities in these few months to retain customers.
+
+```{r, results="markup"}
+loadPkg("corrplot")
+cor_matrix<- telco_data %>% select_if(is.numeric) %>% cor()
+corrplot.mixed(cor_matrix)
+```   
+
+This is the correlation matrix for numeric variables in the dataframe. We can see there is a strong positive correlation between `tenurn` and `Totalcharges`. And there is a moderate positive correlation between `MonthltCharges` and `Totalcharges`.
+
+
+## 3 Logistic Regression
+
+### 3.1 Statistic Testing
+
+```{r, results='markup'}
+#Encode `SeniorCitizen` status to factor for regression, and `Churn` to binary
+telco_data2 <- telco_data
+telco_data2$SeniorCitizen <- ifelse(telco_data2$SeniorCitizen == 1, "Yes", "No")
+telco_data2$Churn <- ifelse(telco_data2$Churn == "Yes", 1, 0)
+```
+
+```{r, results='markup'}
+telco_data_Churn <- with(telco_data2, subset(telco_data2, Churn == 1))
+nrow(telco_data_Churn)
+telco_data_Stay <- with(telco_data2, subset(telco_data2, Churn == 0))
+nrow(telco_data_Stay)
+```
+```{r, results='markup'}
+t.test(telco_data_Churn$TotalCharges, telco_data_Stay$TotalCharges)
+t.test(telco_data_Churn$tenure, telco_data_Stay$tenure)
+chisq.test(xtabs(~ Churn + Contract, data = telco_data2))
+chisq.test(xtabs(~ Churn + gender, data = telco_data2))
+chisq.test(xtabs(~ Churn + SeniorCitizen, data = telco_data2))
+chisq.test(xtabs(~ Churn + Partner, data = telco_data2))
+chisq.test(xtabs(~ Churn + Dependents, data = telco_data2))
+```
+
+
+Here we want to learn whether specific variables could affect `Churn` decisions. Since `tenure` and `TotalCharges` are continuous variables, 2 sample t-test should be used. For categorical variables, Chi-square test is used and we can see there is no statistical difference among men and women when they make `Churn` decisions but other variables have statistically significant impact on the outcome. We will build our model from here.
+
+### 3.2 Model Building
+
+```{r, results='markup'}
+glm1 <- glm(Churn ~ TotalCharges + tenure + Contract, data = telco_data2, family = "binomial")
+summary(glm1)
+```
+
+```{r, results='markup'}
+coef_glm1 <- exp(coef(glm1))
+coef_glm1
+```
+
+```{r, results='markup'}
+loadPkg("caret")
+pred1 <- fitted(glm1)
+pred1 <- ifelse(pred1 > 0.5, 1, 0) %>% factor()
+confusionMatrix(data = pred1, factor(telco_data2$Churn))
+```
+
+```{r, results='markup'}
+loadPkg("ResourceSelection")
+hoslem.test(telco_data2$Churn, fitted(glm1))
+```
+
+The p-value of `r hoslem.test(telco_data2$Churn, fitted(glm1))$p.value` is relatively high. This indicates the model is not really a good fit, despite all the coefficients are significant.
+
+```{r, results='markup'}
+loadPkg("pROC")
+prob1 <- predict(glm1, type = "response")
+telco_data2$prob <- prob1
+h1 <- roc(Churn ~ prob, data = telco_data2)
+auc(h1)
+plot(h1, main = "AUC = 0.819")
+```
+
+ The area-under-curve is `r auc(h1)`, we can improve from here.
+
+```{r, results='markup'}
+loadPkg("pscl")
+pR2_glm1 <- pR2(glm1)
+pR2_glm1[4]
+```
+
+The first model we use `TotalCharges`, `tenure` and `Contract`. After turning the coefficient to exponent, we can see obviously, higher the charges, the more likely customer churn. Long term customer have better loyalty. Let's see the confusion matrix from this model. It gives us the overall accuracy of 0.778. But we actually care more about the false negative rates in terms of Churning: we want the algorithm try not to miss churning customer as much as possible. This model missed 856 churns out of 1587 and this will be our baseline to improve from.
+
+```{r, results='markup'}
+glm2 <- glm(Churn ~ MonthlyCharges + tenure + Contract, data = telco_data2, family = "binomial")
+summary(glm2)
+```
+
+```{r, results='markup'}
+coef_glm2 <- exp(coef(glm2))
+coef_glm2
+```
+
+```{r, results='markup'}
+pred2 <- fitted(glm2)
+pred2 <- ifelse(pred2 > 0.5, 1, 0) %>% factor()
+confusionMatrix(data = pred2, factor(telco_data2$Churn))
+```
+
+In `glm2`, we also tested the effect to replace `TotalCharges` with `MonthlyCharges` and we can see we have a stronger predictor since people are more sensitive to marginal expense. However, with the model grow bigger, the significance level of this predictor decreases and model accuracy was hurt. so its a trade-off between Prediction Accuracy vs. Interpretability
+
+```{r, results='markup'}
+glm3 <- glm(Churn ~ MonthlyCharges + tenure + Contract + PhoneService + InternetService, data = telco_data2, family = "binomial")
+summary(glm3)
+```
+
+
+```{r, results='markup'}
+coef_glm3 <- exp(coef(glm3))
+coef_glm3
+```
+
+Fiber internet service must be laggy and expensive. So many customers are leaving after using it.
+
+```{r, results='markup'}
+pred3 <- fitted(glm3)
+pred3 <- ifelse(pred3 > 0.5, 1, 0) %>% factor()
+confusionMatrix(data = pred3, factor(telco_data2$Churn))
+```
+
+```{r, results='markup'}
+hoslem.test(telco_data2$Churn, fitted(glm3))
+```
+
+The p-value of `r hoslem.test(telco_data2$Churn, fitted(glm3))$p.value` is still relatively high. This indicates the model is still not really a good fit. 
+
+```{r, results='markup'}
+prob3 <- predict(glm3, type = "response" )
+telco_data2$prob <- prob3
+h3 <- roc(Churn ~ prob, data = telco_data2)
+auc(h3)
+plot(h3)
+```
+
+Some improvement.
+
+```{r, results='markup'}
+pR2_glm3 <- pR2(glm3)
+pR2_glm3[4]
+```
+
+In this model we try to consider the effect of phone and internet services. And we discover that phone service users are only 41% likely to churn compared to those who doesn't, so good job phone department. But we also find that customer who installed company's fiber optic internet service is 2.5 times more likely to leave. This is appalling. My initial reaction was to fire the guy who runs that department since the service experience must be abysmal, but I realized it could also because the service is overpriced and got outcompete by competition.
+
+```{r, results='markup'}
+glm4 <- glm(Churn ~ MonthlyCharges + tenure + Contract + PhoneService + InternetService + SeniorCitizen + Partner + Dependents, data = telco_data2, family = "binomial")
+summary(glm4)
+```
+
+
+```{r, results='markup'}
+glm5 <- glm(Churn ~ MonthlyCharges + tenure + Contract + PhoneService + MultipleLines + InternetService + OnlineSecurity + OnlineBackup + DeviceProtection + TechSupport + StreamingTV + StreamingMovies + SeniorCitizen, data = telco_data2, family = "binomial")
+summary(glm5)
+```
+
+
+```{r, results='markup'}
+glm6 <- glm(Churn ~ MonthlyCharges + tenure + Contract + PhoneService + MultipleLines + InternetService + PaperlessBilling + PaymentMethod + SeniorCitizen, data = telco_data2, family = "binomial")
+summary(glm6)
+```
+
+```{r, results='markup'}
+coef_glm6 <- exp(coef(glm6))
+coef_glm6
+```
+
+```{r, results='markup'}
+pred6 <- fitted(glm6)
+pred6 <- ifelse(pred6 > 0.5, 1, 0) %>% factor()
+confusionMatrix(data = pred6, factor(telco_data2$Churn))
+```
+
+```{r, results='markup'}
+hoslem.test(telco_data2$Churn, fitted(glm6))
+```
+
+The p-value of `r hoslem.test(telco_data2$Churn, fitted(glm6))$p.value` is big enough. This indicates the model is a good fit. 
+
+```{r, results='markup'}
+prob6 <- predict(glm6, type = "response" )
+telco_data2$prob <- prob6
+h6 <- roc(Churn ~ prob, data = telco_data2)
+auc(h6)
+plot(h6)
+```
+
+
+```{r, results='markup'}
+pR2_glm6 <- pR2(glm6)
+pR2_glm6[4]
+```
+
+After trial and error process of adding and dropping variables, we've arrived to our best hand-built model. It gives us 0.8 accuracy and 755 false negatives. In this model we discover that people uses paperless billing and electronic checks are more likely to churn, senior citizens are more likely to churn. My theory is that they are more price sensitive and like to keep close tab to their utility bill from APP, for example. So it would be wise decision to offer them discounts through for example mobile apps.
+
+```{r, results='markup'}
+glmF <- glm(Churn ~ ., data = telco_data2[,1:20], family = "binomial")
+summary(glmF)
+```
+
+```{r, results='markup'}
+predF <- fitted(glmF)
+predF <- ifelse(predF > 0.5, 1, 0) %>% factor()
+confusionMatrix(data = predF, factor(telco_data2$Churn))
+```
+
+```{r, results='markup'}
+probF <- predict(glmF, type = "response" )
+telco_data2$prob <- probF
+hF <- roc(Churn ~ prob, data = telco_data2)
+auc(hF)
+plot(hF)
+```
+
+```{r, results='markup'}
+pR2_glmF <- pR2(glmF)
+pR2_glmF[4]
+```
+
+Now we will bring the full model to the table, how much better could it perform? Basically the full model improves prediction accuracy and False Negative rates, improves pseudo $R^2$ and `AUC`, but harms interpretation as predictors are losing significance.
+
+## 4 KNN
+
+### 4.1 Preparation
+The below listed columns are been converted into categorical format using as.factor() method.
+```{r, results="markup"}
+telco_data$gender <- as.factor(telco_data$gender)
+telco_data$SeniorCitizen<-as.factor(telco_data$SeniorCitizen)
+telco_data$Partner <- as.factor(telco_data$Partner)
+telco_data$Dependents <- as.factor(telco_data$Dependents)
+telco_data$PhoneService <- as.factor(telco_data$PhoneService)
+telco_data$MultipleLines <- as.factor(telco_data$MultipleLines)
+telco_data$InternetService <- as.factor(telco_data$InternetService)
+telco_data$OnlineSecurity <- as.factor(telco_data$OnlineSecurity)
+telco_data$OnlineBackup <- as.factor(telco_data$OnlineBackup)
+telco_data$DeviceProtection <- as.factor(telco_data$DeviceProtection)
+telco_data$TechSupport <- as.factor(telco_data$TechSupport)
+telco_data$StreamingTV <- as.factor(telco_data$StreamingTV)
+telco_data$StreamingMovies <- as.factor(telco_data$StreamingMovies)
+telco_data$Contract <- as.factor(telco_data$Contract)
+telco_data$PaperlessBilling <- as.factor(telco_data$PaperlessBilling)
+telco_data$PaymentMethod <- as.factor(telco_data$PaymentMethod)
+telco_data$Churn <- as.factor(telco_data$Churn)
+```
+
+Subsetting the columns as these columns hold char datatype doesnot give optimal results for modelling the knn hence the below listed columns will be dropped for the further cleaning.
+```{r , results='markup'}
+telco_data_new = subset(telco_data, select = -c(gender,SeniorCitizen,Partner,Dependents,PhoneService,MultipleLines,InternetService,OnlineSecurity,OnlineBackup,DeviceProtection,TechSupport,StreamingTV,StreamingMovies ,Contract,PaperlessBilling,PaymentMethod) ) 
+```
+
+
+The columns monthly charges and total charges have been converted into integer by using as.integer() method as these columns will be further treated for feature selection.
+
+```{r, results='markup'}
+telco_data_new$MonthlyCharges<-as.integer(telco_data_new$MonthlyCharges)
+telco_data_new$TotalCharges<-as.integer(telco_data_new$TotalCharges)
+```
+
+Displaying the structure of the new cleaned and processed data.
+```{r, results='markup'}
+str(telco_data_new)
+```
+
+In `telco_data`, there are 16 character variables and 4 numeric variables. Therefore, we need to convert character variables into factor variables. We only need to leave the variables of `tenure`, `MonthlyCharges`, `TotalCharges` and `Churn`, and drop others.
+
+### 4.2 KNN
+Feeding the cleaned data to the knn model and designing the modelling for different k-values.
+```{r, results='markup'}
+
+telcom_data <- as.data.frame(scale(telco_data_new[1:3], center = TRUE, scale = TRUE))
+ 
+set.seed(1000)
+data <- sample(2, nrow(telcom_data), replace=TRUE, prob=c(0.67, 0.33))
+data_training <- telcom_data[data==1, 1:3]
+data_test <- telcom_data[data==2, 1:3]
+```
+
+Creating the X&Y values 
+```{r, results='markup'}
+
+data.trainLabels<- telco_data_new[data==1,4]
+data.testLabels<-telco_data_new[data==2,4]
+```
+
+```{r, results='markup'}
+head(telcom_data)
+```
+So now we will deploy our model  for different k value
+```{r , results='markup'}
+loadPkg("FNN")
+data_pred <- knn(train = data_training, test = data_test, cl=data.trainLabels, k=2)
+data_pred5 <- knn(train = data_training, test = data_test, cl=data.trainLabels, k=5)
+data_pred11 <- knn(train = data_training, test = data_test, cl=data.trainLabels, k=11)
+data_pred20 <- knn(train = data_training, test = data_test, cl=data.trainLabels, k=20)
+```
+
+
+```{r, results='markup'}
+loadPkg("gmodels")
+datapredcross <- CrossTable(data.testLabels, data_pred, prop.chisq = FALSE)
+#Looks like we got all but three correct, not bad
+```
+
+Displaying the confusion matrix for different k-value developed models.
+```{r, results='markup'}
+loadPkg("caret") 
+data_pred <- knn(train = data_training, test = data_test, cl=data.trainLabels, k=2)
+cm = confusionMatrix(data_pred, reference = data.testLabels )
+cm5 = confusionMatrix(data_pred5, reference = data.testLabels )
+cm11 = confusionMatrix(data_pred11, reference = data.testLabels )
+cm20 = confusionMatrix(data_pred20, reference = data.testLabels )
+cm
+cm5
+cm11
+cm20
+```
+
+Predicting the accuracy for the k-value developed models.
+```{r, results='markup'}
+loadPkg("gmodels")
+loadPkg("FNN")
+loadPkg("caret")
+cmaccu = cm$overall['Accuracy']
+print( paste("Total Accuracy = ", cmaccu ) )
+```
+
+We can find that the accuracy value becomes larger as the K value increases. When k = 20, the accuracy is 0.783.
+
+## 5 Decision Tree
+
+So far we worked with two models for our dataset. Now let's try a hand on decision tree to see how the data reacts to it. Since, our dataset is a classification problem we will go with classification tree.
+```{r, results='markup'}
+library("rpart")
+set.seed(1)
+treefit1<-rpart(Churn ~., data=telco_data, method="class",control = list(maxdepth = 5) )
+```
+
+Let's visualize the results of our model.
+```{r, results='markup'}
+printcp(treefit1) # display the results 
+plotcp(treefit1) # visualize cross-validation results 
+summary(treefit1) # detailed summary of splits
+```
+
+Let's plot the tree.
+```{r, results='markup'}
+plot(treefit1, uniform=TRUE, main="Classification Tree for Churn")
+text(treefit1, use.n=TRUE, all=TRUE, cex=.8)
+```
+```{r, results='markup'}
+post(treefit1, file = "decisionTree1.ps", title = "Classification Tree for Churn")
+```
+
+We can see that the above tree is not clear. We can now plot a tidy tree with rpart.plot()
+```{r, results='markup'}
+loadPkg("rpart")
+loadPkg("rpart.plot")
+rpart.plot(treefit1)
+```
+
+From the decision tree model, We see that at the first branching point, there are 4389 no and   1587 yes(with churn). The first split yields 2707 outcomes with contract= one or two years and 3269 outcomes with contract= month to month. 
+
+We can also use some handy library to calculate these percentages in the confusion matrix.
+
+
+```{r, results='markup'}
+loadPkg("caret") 
+cm = confusionMatrix( predict(treefit1, type = "class"), reference = telco_data[, "Churn"] )
+print('Overall: ')
+cm$overall
+print('Class: ')
+cm$byClass
+unloadPkg("caret")
+```
+
+
+```{r, results='markup'}
+xkabledply(cm$table, "confusion matrix")
+```
+We can see our model's accuracy is  79.5%. It reacts well with predicting "NO" values than "YES".
+
+Let us try different different maxdepths, and collect the result summaries for display.
+```{r, results='markup'}
+loadPkg("rpart")
+loadPkg("caret")
+# create an empty dataframe to store the results from confusion matrices
+confusionMatrixResultDf = data.frame( Depth=numeric(0), Accuracy= numeric(0), Sensitivity=numeric(0), Specificity=numeric(0), Pos.Pred.Value=numeric(0), Neg.Pred.Value=numeric(0), Precision=numeric(0), Recall=numeric(0), F1=numeric(0), Prevalence=numeric(0), Detection.Rate=numeric(0), Detection.Prevalence=numeric(0), Balanced.Accuracy=numeric(0), row.names = NULL )
+for (deep in 2:10) {
+  treefit2 <- rpart(Churn ~., data=telco_data, method="class", control = list(maxdepth = deep) )
+  # 
+  cm = confusionMatrix( predict(treefit2, type = "class"), reference = telco_data[, "Churn"] ) # from caret library
+  # 
+  cmaccu = cm$overall['Accuracy']
+  # print( paste("Total Accuracy = ", cmaccu ) )
+  # 
+  cmt = data.frame(Depth=deep, Accuracy = cmaccu, row.names = NULL ) # initialize a row of the metrics 
+  cmt = cbind( cmt, data.frame( t(cm$byClass) ) ) # the dataframe of the transpose, with k valued added in front
+  confusionMatrixResultDf = rbind(confusionMatrixResultDf, cmt)
+  # print("Other metrics : ")
+}
+unloadPkg("caret")
+```
+```{r, results='markup'}
+xkabledply(confusionMatrixResultDf, title="churn Classification Trees summary with varying MaxDepth")
+```
+
+From the chart above, we can see the model's accuracy is not improving even when the depth is increased. 
+Hence, we can plot the final decision tree
+```{r, results='markup'}
+loadPkg("rattle")
+fancyRpartPlot(treefit1)
+```
+
+Prune the tree:
+```{r, results='markup'}
+#prune the tree 
+ptree <- prune(treefit1, cp = treefit1$cptable[2,"CP"])
+# plot the pruned tree 
+fancyRpartPlot(ptree)
+# For boring plot, use codes below instead
+plot(ptree, uniform=TRUE, main="Pruned Classification Tree for Churn")
+text(ptree, use.n=TRUE, all=TRUE, cex=.8)
+```
+
+After pruning the model, we got the optimal decision tree for the dataset. We can see the churn rate of people who sign the contract for one or two years is 7%. For the people who sign the month-to-month contact, who has the fiber optic internet service, and whose tenure is less than 15, their churn rate is 70% which is the highest.
+
+## 6 Conclusion
+
+
+In the end, through a series of data analysis, we solved our Smart questions. Some customer demographics, certain services, tenure and monthly charges affect churn.We found that Churn percentage is higher in the case of senior citizens and customers with partners or dependents have a lower churn percentage compared to those who don't. There is also no statistical difference among men and women when they make churn decisions. We can reliably predict if a customer will churn using these Machine Learning algorithms(Logistic Regression, Decision Tree Classification, KNN). We can see that the churn rate of people who sign the contract for one or two years is 7%. For the people who sign the month-to-month contact, who has the fiber optic internet service, and whose tenure is less than 15, their churn rate is 70% which is the highest. This will help the telecom company predict customers that are likely to churn. The company can then take some preventive measures like rolling out offers to these customers in an attempt to retain them.
+
+
+## 7 Bibliography
+
+
+Data Source: 
+
+1. https://www.kaggle.com/radmirzosimov/telecom-users-dataset
+2. http://community.ibm.com/community/user/businessanalytics/blogs/steven-macko/2019/07/11/telco-customer-churn-1113
+
+
